@@ -101,7 +101,7 @@ def select_taus(all):
     })
 
 
-def correct_vertex(data, purity=0.5):
+def correct_vertex(data, purity=0):
     """Params: data (awk array) purity = fraction of tracks in best vertex which must be from the target process for the event to have a best vertex
     Returns: array of len (n,) of the index of the best vertex candidate (vertex with most HS process tracks pointing to it)
     ie the rv_index of the candidate holding the most tracks with trk_truth_vtx == 0,
@@ -228,6 +228,15 @@ def tjva_v2(cone, data, taus, sumpt2_choice_per_tau, window=1.0):
                        "Nonprompt" track-to-vertex association, which lets TJVA use tau tracks that are in no vertex fit.
       SAME as v1:      the scoring (f(v), argmax, SumPT2 fallback) -- it just calls tjva_v1 on the updated assignment.
     Returns (choice, max_f, fallback, n_rescued) with n_rescued = number of rescued cone tracks per tau."""
+    
+    new_vtx = rescue_unassigned(cone,data,taus)
+
+    # SAME as v1 from here on
+    choice, max_f, fallback = tjva_v1({**cone, "vtx": new_vtx}, sumpt2_choice_per_tau)
+    return choice, max_f, fallback, ak.to_numpy(ak.sum(rescued, axis=-1))
+
+def rescue_unassigned(cone,data,taus):
+    """See docstring in tjva_v2 for function"""
     ev = taus.event.values
     rv_z = data.rv_z[ev]           # candidate vertex positions per tau, shape (n, nvertices)
     rv_index = data.rv_index[ev]
@@ -244,11 +253,7 @@ def tjva_v2(cone, data, taus, sumpt2_choice_per_tau, window=1.0):
     # rescue: only tracks that are unassigned AND close enough to a vertex; everything else keeps its assignment
     rescued = (cone["vtx"] < 0) & ak.fill_none(nearest_dist < window, False)
     new_vtx = ak.where(rescued, ak.fill_none(nearest_vtx, -1), cone["vtx"])
-
-    # SAME as v1 from here on
-    choice, max_f, fallback = tjva_v1({**cone, "vtx": new_vtx}, sumpt2_choice_per_tau)
-    return choice, max_f, fallback, ak.to_numpy(ak.sum(rescued, axis=-1))
-
+    return new_vtx
 
 def tjva_andsumpt2(data, taus=None):
     """Per-tau choices of every baseline, as a DataFrame aligned row-by-row with `taus`."""
