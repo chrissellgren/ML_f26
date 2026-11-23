@@ -11,6 +11,7 @@ Keep this file and the notebook in sync: develop in the notebook, then paste the
 import awkward as ak
 import numpy as np
 import pandas as pd
+from vtx import samples
 
 
 def cut(all, printing=False):
@@ -184,6 +185,7 @@ def cone_tracks(data, taus, dr_max=0.2, pt_min=1.0):
     return {"pt":  trk_pts[m_trkincone],                    # used for calculating f(v)
             "vtx": data.trk_delphes_vtx[ev][m_trkincone],   # which vertex each track in cone points to
             "dz":  data.trk_dz[ev][m_trkincone],
+            "err_dz": data.trk_err_dz[ev][m_trkincone],     # z0 uncertainty (used by the transformer's tau features)
             "eta": trk_etas[m_trkincone]}
 
 
@@ -229,13 +231,14 @@ def tjva_v2(cone, data, taus, sumpt2_choice_per_tau, window=1.0):
       SAME as v1:      the scoring (f(v), argmax, SumPT2 fallback) -- it just calls tjva_v1 on the updated assignment.
     Returns (choice, max_f, fallback, n_rescued) with n_rescued = number of rescued cone tracks per tau."""
     
-    new_vtx = rescue_unassigned(cone,data,taus)
+    new_vtx = rescue_unassigned(cone,data,taus,window)
+    rescued = new_vtx != cone["vtx"]   # tracks whose assignment the rescue changed
 
     # SAME as v1 from here on
     choice, max_f, fallback = tjva_v1({**cone, "vtx": new_vtx}, sumpt2_choice_per_tau)
     return choice, max_f, fallback, ak.to_numpy(ak.sum(rescued, axis=-1))
 
-def rescue_unassigned(cone,data,taus):
+def rescue_unassigned(cone,data,taus,window=1.0):
     """See docstring in tjva_v2 for function"""
     ev = taus.event.values
     rv_z = data.rv_z[ev]           # candidate vertex positions per tau, shape (n, nvertices)
@@ -284,3 +287,22 @@ def chosen_z(data, taus, choice):
     ev = taus.event.values
     z = ak.firsts(data.rv_z[ev][data.rv_index[ev] == choice])
     return ak.to_numpy(ak.fill_none(z, np.nan))
+
+COLS = [
+    # bookkeeping
+    "event_id", "run_id", "slice", "mu_nominal", "xsec_pb",
+    # reco tracks
+    "trk_pt", "trk_eta", "trk_phi", "trk_dz", "trk_err_dz", "trk_d0", "trk_err_d0", "trk_charge", "trk_delphes_vtx",
+    # reco candidate vertices (Delphes VertexFinder)
+    "rv_index", "rv_z", "rv_err_z", "rv_ndf", "rv_sumpt2",
+    # reco jets
+    "jet_pt", "jet_eta", "jet_phi",
+    # truth (selection + labels only)
+    "trk_truth_vtx", "trk_truth_is_pu", "trk_truth_tau", "truth_hs_z", "truth_n_vtx",
+    "truth_tau_vis_pt", "truth_tau_vis_eta", "truth_tau_vis_phi", "truth_tau_nprong",
+    "truth_tau_leptonic", "truth_tau_from_hard",
+]
+
+def load_dev(mu, run=101, slice_="A_m60_120", columns=COLS):
+    """One production run (5,000 events) at one mu, for fast development."""
+    return ak.from_parquet(samples.SLIM / slice_ / f"run{run}_mu{mu}.parquet", columns=columns)
